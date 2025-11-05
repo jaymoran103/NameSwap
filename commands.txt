@@ -1,0 +1,6 @@
+# generate files using anonymizenames.py:
+clear;python3 anonymizenames.py -f ElectiveRosters_s1w1v1.csv -f ElectiveRosters_s1w1v2.csv -f CamperRoster_s1w1.csv -c Camper -c Last\ Name -c First\ Name -c Preferred\ Name -c Cabin
+
+# remove generated files:
+rm renamed-*
+
