@@ -1,4 +1,58 @@
 import sys
+from faker import Faker
+#from typing import Dict,Set
+
+
+
+# Renamer class for generating and storing safe names
+class Renamer:
+
+    # Initializes the Renamer with a seed for deterministic name generation.
+    def __init__(self, seed: str = "safenames"):
+        self.mappings: Dict[str, str] = {}
+        self.used_names: Set[str] = set()
+
+        # Use Faker to generate names
+        self.fake = Faker()
+        Faker.seed(seed)
+        # Faker.seed(hash(seed) % (2**32))  # Future - add option to make names random or deterministic
+
+    # Generates or retrieves a safe name for the given original name.
+    def get_safe_name(self, original: str) -> str:
+
+        # Return empty or whitespace-only names. Future - handle pre-validation in separate method?
+        if not original or not original.strip() or original is None:
+            return original
+            
+        # Strip whitespace for consistent mapping, return existing mapping if present
+        original = original.strip()
+        if original in self.mappings:
+            return self.mappings[original]
+        
+        # Try to generate a unique name. While building, capping attempts at 10/20 meant no collisions
+        #max_attempts = GENERATION_ATTEMPT_LIMIT #Future - reimplement
+        max_attempts = 20 #magic number - log curve flattens out around 15 attempts
+
+        for attempt in range(max_attempts):
+            candidate = self.fake.first_name()
+            if candidate not in self.used_names:
+                self.mappings[original] = candidate
+                self.used_names.add(candidate)
+                return candidate
+
+        # If attempts fail, add number suffix to ensure uniqueness
+        base_name = self.fake.first_name()
+        counter = len(self.used_names)
+        candidate = f"{base_name}{counter}"
+        
+        self.mappings[original] = candidate
+        self.used_names.add(candidate)
+
+        WARN_MAX_ATTEMPTS = True #Future - reimplement as config field
+        if WARN_MAX_ATTEMPTS:
+            print(f"Max attempts reached ({attempt}). Assigned unique name '{candidate}' for original name '{original}'.")
+
+        return candidate
 
 # Configuration class to handle command-line arguments for inputs and options
 class Configuration:
@@ -96,6 +150,6 @@ if __name__ == "__main__":
     if config.userConfirm():
         files = config.files
         columns = config.columns
-        #renamer = Renamer(files,columns) #TODO Implement
+        renamer = Renamer()
         #fileiterator = CSVIterator(renamer,config) #TODO Implement
 
