@@ -1,6 +1,8 @@
 import sys
+import time
+import csv
 from faker import Faker
-#from typing import Dict,Set
+from typing import Dict,Set
 
 
 
@@ -18,7 +20,8 @@ class Renamer:
         # Faker.seed(hash(seed) % (2**32))  # Future - add option to make names random or deterministic
 
     # Generates or retrieves a safe name for the given original name.
-    def get_safe_name(self, original: str) -> str:
+    # def get_safe_name(self, original: str) -> str: TODO enforce type?
+    def get_safe_name(self, original):
 
         # Return empty or whitespace-only names. Future - handle pre-validation in separate method?
         if not original or not original.strip() or original is None:
@@ -54,6 +57,10 @@ class Renamer:
 
         return candidate
 
+
+
+
+
 # Configuration class to handle command-line arguments for inputs and options
 class Configuration:
 
@@ -81,7 +88,7 @@ class Configuration:
             self.columns.append(path) 
 
     def print_menu(self):
-        print("usage: main.py [-f <file>] [-c <column>] [--help]")
+        print("usage: main.py [-f <file>] [-c <column>]")
 
     def processArgs(self,arg_queue:list):
 
@@ -122,6 +129,7 @@ class Configuration:
         if self.columns == []:
             print("No columns specified. Use -c <column> to add columns.")
             return False
+        return True
         #Future - check validity of input files, maybe offer fallbacks for columns?
 
     def reportReady(self):
@@ -139,17 +147,126 @@ class Configuration:
             return False
 
 
+
+
+# CSVProcessor class for processing CSV files and replacing names in specified columns.
+# Future - add graceful handling somewhere for file issues
+class CSVProcessor:
+
+    def __init__(self, config: Configuration, renamer: Renamer):
+        self.config = config
+        self.renamer = renamer
+
+        self.name_columns = config.columns
+        self.target_files = config.files
+
+        self.output_prefix = "renamed"
+
+    def start(self):
+        print(f"Starting processing of files: {self.target_files}")
+        for input_file in self.target_files:
+            output_file = f"{self.output_prefix}-{input_file}"
+            print(f"Processing {input_file} -> {output_file}",end="\n")
+            self.process_file(input_file, output_file)
+            print(f" ^ success")
+    
+    #iterate through input file, replacing names in target columns and writing to output file
+    def process_file(self, input_path: str, output_path: str):
+
+        with open(input_path, 'r', newline='', encoding='utf-8-sig') as infile:
+                    
+            #TODO - settle on final approach for handling cm file bugs in header row
+            #before setting up reader, read and store header (fixes DictWriter bug where irregular header lines would be recreated unfaithfully, rather than leaving headers untouched)
+            #header_line = infile.readline() # Add this line to store the header before printing verbatim as output header
+            reader = csv.DictReader(infile)
+            
+            with open(output_path, 'w', newline='', encoding='utf-8') as outfile:
+                # outfile.write(header_line)
+                if reader.fieldnames:
+
+                    writer = csv.DictWriter(
+                        outfile, 
+                        fieldnames=reader.fieldnames,
+                        quoting=csv.QUOTE_ALL, # Ensures all fields are quoted, convention for CM files
+                        # extrasaction='ignore'  # Add this to handle extra columns
+                    )
+                    writer.writeheader() #comment out if using the header_line bug fix
+                    
+                    #iterate through rows, replacing names when relevant
+                    for row in reader:
+                        print(f"+{row}")
+                        for col in self.name_columns:
+                            if col in row and row[col]:
+                                
+                                row[col] = self.renamingFunction(self.renamer,row[col])
+
+                        # Write row with replaced names
+                        writer.writerow(row)
+ 
+    #Given a name string, returns a renamed, ready to use version 
+    #Based on TOKENIZE_NAME_PARTS status, will apply renamer to the whole string, or in chunks split by designated characters
+    def renamingFunction(self,renamer_instance: Renamer,nameString: str):
+
+        TOKENIZE_NAME_PARTS = True #TODO - reimplement as configurable option
+        #Future - handle with first class function somewhere calling this function or get_safe_name directly?
+        #Rename and return whole string if not tokenizing
+        if not TOKENIZE_NAME_PARTS: 
+            return renamer_instance.get_safe_name(nameString)
+
+        else:
+            #splittingStrings = ["del","jr","sr"] #Future - also exempt strings like titles and connecting words?
+            splittingCharacters = [' ','-','–','—',',']
+
+            built_string = ""
+            pending_chars = ""
+
+            #Iterate through characters in string, pausing to rename and append recent characters whenever a splitting character is reached.
+            for c in nameString:
+                # if splittingCharacters.contains(c):
+                if c in splittingCharacters:
+                    
+                    renamed_string = renamer_instance.get_safe_name(pending_chars)
+                    print(f"{pending_chars} -> {renamed_string}")
+                    #append renamed string and splitting token, then clear pendingChars
+                    built_string += renamed_string
+                    built_string += c
+                    pending_chars = ""
+                else:
+                    pending_chars+=c
+                    
+
+            #if a remainder exists, rename and append
+            if pending_chars != "":                
+                # built_string += renamer_instance.get_safe_name(pending_chars)
+                # built_string += renamer_instance.get_safe_name(pending_chars)
+                built_string += renamer_instance.get_safe_name(pending_chars)
+
+            return built_string
+
 if __name__ == "__main__":
-    # arg_queue = sys.argv[1:]
     config = Configuration()
     config.processArgs(sys.argv[1:])
 
     if config.validateConfig():
         config.reportReady()
+    else:
+        print("Validation failed. Exiting")
+        exit(0)
     
     if config.userConfirm():
-        files = config.files
-        columns = config.columns
         renamer = Renamer()
-        #fileiterator = CSVIterator(renamer,config) #TODO Implement
+        file_processor = CSVProcessor(config,renamer)
+
+        #Start process, timing for user feedback
+        start_time = time.perf_counter()
+        file_processor.start()
+        end_time = time.perf_counter()
+
+        #Determine elapsed time and print exit message
+        elapsed_time = end_time - start_time
+        print(f"Process finished in {elapsed_time:0.3f}s\n")
+
+
+    else:
+        exit(1)
 
