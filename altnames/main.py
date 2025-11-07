@@ -63,10 +63,19 @@ class Configuration:
 
     # Initializes the Configuration with default settings, and maps flags and options to their handling functions.
     def __init__(self):
+        #Inputs to collect
         self.files = []
         self.columns = []
-        self.prefix = None
+        self.selected_prefix = None
+
+        #Booleans, some settable by option flags
         self.skip_confirmation_step = False
+        self.USE_DEFAULTS_AS_FALLBACK = True
+
+        #Default values, to apply as needed
+        self.default_prefix = "renamed"
+        self.default_columns = ["First Name","Last Name","Preferred Name","Camper"]
+        #self.generic_default_columns = ["Name","Full Name","First Name","Last Name","Preferred Name","Nickname"] #Truly generic version for defaults. Not relevant to my use case
 
         # Map command-line flags to their handler functions
         self.flag_mappings = {
@@ -80,11 +89,13 @@ class Configuration:
           "--help" : self.helpOptionHandler,
           "--menu" : self.menuOptionHandler, #Future - implement a more detailed menu, with --help offering a more concise tip and reference to --menu for more
           "--skip" : self.skipOptionHandler, 
+          "--defaultcolumns" : self.applyDefaultColumns, #Future - add default column set feature from original version
+          #"--splitnames" : self.applySplitNames, #Future - make name splitting feature toggleable
           #"--autocolumns" : autoDetectColumns(), #Future - add auto column detection feature from original version
-          #"--defaultcolumns" : applydefaultColumns(), #Future - add default column set feature from original version
           #"--randomnames" : setRandomNames(), #Future - add option to use non-deterministic random names
         }
-    
+
+
     # Handler for the '-f' flag adds input files for processing
     def addFile(self,path:str):
         if path not in self.files:
@@ -95,12 +106,13 @@ class Configuration:
         if path not in self.columns:
             self.columns.append(path) 
     
-    # Handler for the '-p' flag sets the output file prefix, if not already set here
+    # Handler for the '-p' flag sets the output file prefix, if not already set here:
     def setPrefix(self,prefix:str):
-        if self.prefix is None:
-            self.prefix = prefix
-        else:
-            print(f"Prefix already set using '-s', ignoring additional prefix argument {prefix}")
+        self.selected_prefix = prefix
+        # if self.prefix is None:
+        #     self.prefix = prefix
+        # else:
+        #     print(f"Prefix already set using '-s', ignoring additional prefix argument {prefix}") #even my zsh doesnt seem to enforce this, neccessary at all?
 
     # Handler for the '--menu' option – prints usage information. Future - add detailed menu/help prints once all planned features are implemented
     def menuOptionHandler(self):
@@ -116,6 +128,11 @@ class Configuration:
     def skipOptionHandler(self):
         self.skip_confirmation_step = True
 
+    # Applies default columns to the configuration
+    def applyDefaultColumns(self):
+        for col in self.default_columns:
+            self.addColumn(col)
+    
     # Processes command-line arguments to configure the application.
     def processArgs(self,arg_queue:list):
 
@@ -147,8 +164,21 @@ class Configuration:
                 print()
                 self.menuOptionHandler() #not ideal to use this here, but avoids code duplication. FUTURE - tweak while implementing true menu/help prints
 
+    #TODO this step needs a better name. Will it end up doing more than default columns and prefix?
+    def beforeValidation(self):
+        #Apply default columns if none were specified and fallback is enabled
+        if self.columns == [] and self.USE_DEFAULTS_AS_FALLBACK:
+            print("No columns specified, applying default columns.")
+            self.applyDefaultColumns()
+
+        #Apply default prefix if none was specified
+        if self.selected_prefix is None:
+            print(f"No prefix specified, applying default prefix '{self.default_prefix}'.")
+            self.selected_prefix = self.default_prefix
+
     # Validates the current configuration to ensure inputs are valid and ready to use
     def validateConfig(self):
+        
         if self.files == []:
             print("No files specified. Use -f <file> to add files.")
             return False
@@ -188,17 +218,14 @@ class CSVProcessor:
         self.config = config
         self.renamer = renamer
 
+        #Better practice to define each here, or pull from self.config.whatever each time? Values wont change at this point
         self.name_columns = config.columns
         self.target_files = config.files
-
-        self.output_prefix = config.prefix or "renamed"
-        # self.output_prefix = "renamed"
-        # if config.prefix is not None:
-        #     self.output_prefix = config.prefix #TODO make more elegant
+        self.given_prefix = config.selected_prefix
 
     def start(self):
         for input_file in self.target_files:
-            output_file = f"{self.output_prefix}-{input_file}"
+            output_file = f"{self.given_prefix}-{input_file}"
             print(f"Processing {input_file} -> {output_file}",end="\n")
             self.processFile(input_file, output_file)
     
@@ -276,6 +303,7 @@ class CSVProcessor:
 if __name__ == "__main__":
     config = Configuration()
     config.processArgs(sys.argv[1:])
+    config.beforeValidation()
 
     if config.validateConfig():
         config.reportReady()
@@ -286,6 +314,7 @@ if __name__ == "__main__":
     if config.userConfirm():
         renamer = Renamer()
         file_processor = CSVProcessor(config,renamer)
+
 
         #Start process, timing for user feedback
         start_time = time.perf_counter()
