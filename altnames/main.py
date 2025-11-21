@@ -4,8 +4,6 @@ import csv
 from faker import Faker
 from typing import Dict,Set
 
-
-
 # Renamer class for generating and storing safe names
 class Renamer:
 
@@ -13,21 +11,21 @@ class Renamer:
     def __init__(self, seed: str):
         self.mappings: Dict[str, str] = {}
         self.used_names: Set[str] = set()
-        #Generate random seed if none specified
+
+        # Generate random seed if none specified
         if seed is None:
             seed = hash("text") % (2**32)
             print(f"generating seed in Renamer: {seed}")
             
-        # Use Faker to generate names
+        # Set up Faker with seed
         self.fake = Faker()
         Faker.seed(seed)
-        # Faker.seed(hash(seed) % (2**32))  # Future - add option to make names random or deterministic
 
     # Generates or retrieves a safe name for the given original name.
     # def get_safe_name(self, original: str) -> str: TODO enforce type?
     def get_safe_name(self, original):
 
-        # Return empty or whitespace-only names. Future - handle pre-validation in separate method?
+        # Return empty or whitespace-only names.
         if not original or not original.strip() or original is None:
             return original
             
@@ -37,10 +35,10 @@ class Renamer:
             return self.mappings[original]
         
         # Try to generate a unique name. While building, capping attempts at 10/20 meant no collisions
-        #max_attempts = GENERATION_ATTEMPT_LIMIT #Future - reimplement
-        max_attempts = 20 #magic number - log curve flattens out around 15 attempts
-
+        max_attempts = 20 #magic number - log curve flattens out around 15 attempts TODO: Make this a field here or in config?
         for attempt in range(max_attempts):
+
+            # Generate a name, storing the mapping if its unique. Otherwise 
             candidate = self.fake.first_name()
             if candidate not in self.used_names:
                 self.mappings[original] = candidate
@@ -52,10 +50,11 @@ class Renamer:
         counter = len(self.used_names)
         candidate = f"{base_name}{counter}"
         
+        # Store new mapping
         self.mappings[original] = candidate
         self.used_names.add(candidate)
 
-        WARN_MAX_ATTEMPTS = True #Future - reimplement as config field
+        WARN_MAX_ATTEMPTS = True #TODO: Make this a field here or in config?
         if WARN_MAX_ATTEMPTS:
             print(f"Max attempts reached ({attempt}). Assigned unique name '{candidate}' for original name '{original}'.")
 
@@ -76,7 +75,7 @@ class Configuration:
         #Booleans, some settable by option flags
         self.skip_confirmation_step = False
         self.use_default_columns_if_none_specified = True
-        self.rename_whole_cells = False
+        self.rename_whole_cells = False  #Applies renaming function to whole cells. For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
 
         #Default values, to apply as needed
         self.default_prefix = "renamed"
@@ -95,10 +94,10 @@ class Configuration:
         # Map command-line options to their handler functions
         self.option_mappings = {
             "--help" : self.handle_option_help,
-            "--menu" : self.handle_option_menu, #Future - implement a more detailed menu, with --help offering a more concise tip and reference to --menu for more
+            "--menu" : self.handle_option_menu,
             "--skip" : self.handle_option_skip, 
-            "--defaultcolumns" : self.handle_option_defaultcolumns, #Future - add default column set feature from original version
-            "--renamewholecells" : self.handle_option_renamewholecells, #Applies renaming function to whole cells. For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
+            "--defaultcolumns" : self.handle_option_defaultcolumns,
+            "--renamewholecells" : self.handle_option_renamewholecells,
             # "--autocolumns" : autoDetectColumns, #Future - add auto column detection feature from original version
         }
 
@@ -130,9 +129,8 @@ class Configuration:
               [-s <seed>]   - optionally specify a seed for consistent name mappings.
               """)
               #[--renamewholecells] this is risky and you probably dont want it for your use case
-
-        exit(1)
         #Future - if other arguments were provided, explain to user that menu/help was called and no further processing will occur?
+        exit(1)
 
     # Handler for the '--help' option to display help information. Future - spruce this up once planned features are implemented
     def handle_option_help(self):
@@ -157,7 +155,7 @@ class Configuration:
     # Processes command-line arguments to configure the application.
     def process_args(self,arg_queue:list):
 
-        #Future - iterate over args rather than consuming a queue? since this isnt the original copy and is simple, im not concerned
+        # Pop arguments from queue, treating as flags, options, or inputs
         while len(arg_queue) > 0:
             current_arg = arg_queue.pop(0)
 
@@ -181,9 +179,7 @@ class Configuration:
                 #print(f"argument '{current_arg}' wasn't a recognized flag or option. Handling as input file (-f)")
                 #self.flag_mappings["-f"](current_arg)
 
-                print(f"currently no support for argument: '{current_arg}' without a preceding flag. Exiting for safety")
-                print()
-                self.handle_option_menu() #not ideal to use this here, but avoids code duplication. FUTURE - tweak while implementing true menu/help prints
+                print(f"currently no support for argument: '{current_arg}' without a preceding flag. Exiting for safety. run with flag --help or --menu for more information")
 
     #Finish setup step, applying defaults where relevant
     def finish_setup(self):
