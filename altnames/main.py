@@ -76,7 +76,7 @@ class Configuration:
         #Booleans, some settable by option flags
         self.skip_confirmation_step = False
         self.use_default_columns_if_none_specified = True
-        self.tokenize_name_parts = True
+        self.rename_whole_cells = False
 
         #Default values, to apply as needed
         self.default_prefix = "renamed"
@@ -98,7 +98,7 @@ class Configuration:
             "--menu" : self.handle_option_menu, #Future - implement a more detailed menu, with --help offering a more concise tip and reference to --menu for more
             "--skip" : self.handle_option_skip, 
             "--defaultcolumns" : self.handle_option_defaultcolumns, #Future - add default column set feature from original version
-            # "--splitnames" : self.applySplitNames, #Future - make name splitting feature toggleable
+            "--renamewholecells" : self.handle_option_renamewholecells, #Applies renaming function to whole cells. For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
             # "--autocolumns" : autoDetectColumns, #Future - add auto column detection feature from original version
         }
 
@@ -129,6 +129,8 @@ class Configuration:
               [-p <prefix>] - optionally specify the prefix for renamed files, replacing 'renamed-')
               [-s <seed>]   - optionally specify a seed for consistent name mappings.
               """)
+              #[--renamewholecells] this is risky and you probably dont want it for your use case
+
         exit(1)
         #Future - if other arguments were provided, explain to user that menu/help was called and no further processing will occur?
 
@@ -147,6 +149,10 @@ class Configuration:
     def handle_option_defaultcolumns(self):
         for col in self.default_columns:
             self.handle_flag_column(col)
+
+    # Applies renamer to whole name strings, not tokenizing to catch spaces or special characters.
+    def handle_option_renamewholecells(self):
+        self.rename_whole_cells = True
     
     # Processes command-line arguments to configure the application.
     def process_args(self,arg_queue:list):
@@ -276,12 +282,11 @@ class CSVProcessor:
                         writer.writerow(row)
  
     #Given a name string, returns a renamed, ready to use version 
-    #Based on tokenize_name_parts status, will apply renamer to the whole string, or in chunks split by designated characters
+    #If rename_whole_cells is True, applies renamer to the whole string, rather than chunks split by designated characters
+    #   ^For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
     def renamingFunction(self,renamer_instance: Renamer,nameString: str):
 
-        #Future - handle with first class function somewhere calling this function or get_safe_name directly?
-        #Rename and return whole string if not tokenizing
-        if not self.config.tokenize_name_parts: 
+        if self.config.rename_whole_cells: 
             return renamer_instance.get_safe_name(nameString)
 
         else:
