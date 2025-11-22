@@ -3,27 +3,64 @@ import time
 import csv
 from faker import Faker
 from typing import Dict,Set
+from textwrap import dedent
+import random
+
+#Help text for command line usage
+HELP_TEXT = dedent("""
+    This program renames names in specified columns of CSV files, generating safe alternatives for demos. 
+    It requires command line arguments to specify the target files and columns for renaming.
+    Each input requires a preceding flag to indicate its type.
+    
+    Basic usage: main.py [-f <file>] [-c <column>]
+    (Extra -f and -c flags can be provided to add more flags and columns)
+    
+    For more options: main.py --menu 
+""")    
+
+# Detailed menu text for command line usage
+MENU_TEXT = dedent("""
+    Usage: main.py [-f <file>] [-c <column>] [other flags] [options]
+    Note: Each input requires a preceding flag to indicate its type. 
+
+    Input flags:
+        [-f <file>]   - file(s) to process. Requires at least one file
+        [-c <column>] - column(s) to rename. If none are provided, a default set is applied.
+        [-p <prefix>] - optionally specify the prefix for renamed files. defaults to 'renamed-')
+        [-s <seed>]   - optionally specify a seed for deterministic mappings. (same inputs with same seed yield same outputs)
+
+    Option flags:
+        [--help]             - display basic help information
+        [--menu]             - display this menu information
+        [--skip]             - skip confirmation step before processing (use with caution)
+        [--defaultcolumns]   - apply default columns if none were specified
+        [--renamewholecells] - apply renaming to entire cells, instead of splitting by spaces and commas. (use with caution)
+        [--warnmaxattempts]  - warn if max attempts to generate unique names is reached (may indicate high name collision rate)
+
+        see documentation for more details on each flag and option, especially -s and --renamewholecells
+""")
 
 # Renamer class for generating and storing safe names
 class Renamer:
 
     # Initializes the Renamer with a seed for deterministic name generation.
-    def __init__(self, seed: str):
+    def __init__(self, seed: str, max_attempts: int = 25, warn_on_max_attempts: bool = False):
+        self.max_attempts = max_attempts
+        self.warn_on_max_attempts = warn_on_max_attempts
         self.mappings: Dict[str, str] = {}
         self.used_names: Set[str] = set()
 
         # Generate random seed if none specified
         if seed is None:
-            seed = hash("text") % (2**32)
-            print(f"generating seed in Renamer: {seed}")
+            seed = random.randint(0,100)
+            #print(f"generating seed in Renamer: {seed}")
             
         # Set up Faker with seed
         self.fake = Faker()
         Faker.seed(seed)
 
     # Generates or retrieves a safe name for the given original name.
-    # def get_safe_name(self, original: str) -> str: TODO enforce type?
-    def get_safe_name(self, original):
+    def get_safe_name(self, original:str):
 
         # Return empty or whitespace-only names.
         if not original or not original.strip() or original is None:
@@ -34,9 +71,8 @@ class Renamer:
         if original in self.mappings:
             return self.mappings[original]
         
-        # Try to generate a unique name. While building, capping attempts at 10/20 meant no collisions
-        max_attempts = 20 #magic number - log curve flattens out around 15 attempts TODO: Make this a field here or in config?
-        for attempt in range(max_attempts):
+        # Try to generate a unique name.
+        for attempt in range(self.max_attempts):
 
             # Generate a name, storing the mapping if its unique. Otherwise 
             candidate = self.fake.first_name()
@@ -54,8 +90,8 @@ class Renamer:
         self.mappings[original] = candidate
         self.used_names.add(candidate)
 
-        WARN_MAX_ATTEMPTS = True #TODO: Make this a field here or in config?
-        if WARN_MAX_ATTEMPTS:
+        # Warn user if max attempts were reached
+        if self.warn_on_max_attempts:
             print(f"Max attempts reached ({attempt}). Assigned unique name '{candidate}' for original name '{original}'.")
 
         return candidate
@@ -66,6 +102,8 @@ class Configuration:
 
     # Initializes the Configuration with default settings, and maps flags and options to their handling functions.
     def __init__(self):
+        self.argument_count = -1
+
         #Inputs to collect
         self.files = []
         self.columns = []
@@ -76,6 +114,7 @@ class Configuration:
         self.skip_confirmation_step = False
         self.use_default_columns_if_none_specified = True
         self.rename_whole_cells = False  #Applies renaming function to whole cells. For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
+        self.warn_max_attempts = False
 
         #Default values, to apply as needed
         self.default_prefix = "renamed"
@@ -98,18 +137,19 @@ class Configuration:
             "--skip" : self.handle_option_skip, 
             "--defaultcolumns" : self.handle_option_defaultcolumns,
             "--renamewholecells" : self.handle_option_renamewholecells,
-            # "--autocolumns" : autoDetectColumns, #Future - add auto column detection feature from original version
+            "--warnmaxattempts" : self.handle_option_warnmaxattempts,
+            # "--autocolumns" : autoDetectColumns, #FUTURE - add auto column detection feature from original version
         }
 
 
     # Handler for the '-f' flag adds input files for processing
     def handle_flag_file(self,path:str):
-        if path not in self.files:
+        if path not in self.files: #FUTURE - catch file issues here?
             self.files.append(path)
     
     # Handler for the '-c' flag adds target columns for renaming
     def handle_flag_column(self,col:str):
-        if col not in self.columns:
+        if col not in self.columns: #FUTURE - consider case sensitivity?
             self.columns.append(col) 
     
     # Handler for the '-p' flag sets the output file prefix. 
@@ -120,24 +160,23 @@ class Configuration:
     def handle_flag_seed(self,seed:str):
         self.selected_seed = seed
 
-    # Handler for the '--menu' option – prints usage information. Future - spruce this up once planned features are implemented
+    # Handler for the '--menu' option – prints usage information.
     def handle_option_menu(self):
-        print("""usage: main.py
-              [-f <file>]   - program requires at least one file, each marked by this flag
-              [-c <column>] - column(s)if none are provided, applies default set
-              [-p <prefix>] - optionally specify the prefix for renamed files, replacing 'renamed-')
-              [-s <seed>]   - optionally specify a seed for consistent name mappings.
-              """)
-              #[--renamewholecells] this is risky and you probably dont want it for your use case
-        #Future - if other arguments were provided, explain to user that menu/help was called and no further processing will occur?
-        exit(1)
+        print(MENU_TEXT)
+        if self.argument_count > 1:
+            extras = self.argument_count - 1
+            plural = "s were" if extras != 1 else " was"
+            print(f"Note: {extras} extra argument{plural} found, but --menu stops execution.\nTo continue, remove --menu.")
+        exit(0)
 
-    # Handler for the '--help' option to display help information. Future - spruce this up once planned features are implemented
+    # Handler for the '--help' option to display help information.
     def handle_option_help(self):
-        print("""This program requires arguments to specify the targets and methods for a renaming operation
-                usage: main.py [-f <file>] [-c <column>]
-                 \nfor more info, run main.py --menu """)
-        exit(1)
+        print(HELP_TEXT)
+        if self.argument_count > 1:
+            extras = self.argument_count - 1
+            plural = "s were" if extras != 1 else " was"
+            print(f"Note: {extras} extra argument{plural} found, but --help stops execution.\nTo continue, remove --help.")
+        exit(0)
 
     # Handler for the '--skip' option to bypass confirmation step
     def handle_option_skip(self):
@@ -152,8 +191,14 @@ class Configuration:
     def handle_option_renamewholecells(self):
         self.rename_whole_cells = True
     
+    # Enables warning when max attempts to generate unique names is reached
+    def handle_option_warnmaxattempts(self):
+        self.warn_max_attempts = True
+
     # Processes command-line arguments to configure the application.
     def process_args(self,arg_queue:list):
+
+        self.argument_count = len(arg_queue)
 
         # Pop arguments from queue, treating as flags, options, or inputs
         while len(arg_queue) > 0:
@@ -180,6 +225,7 @@ class Configuration:
                 #self.flag_mappings["-f"](current_arg)
 
                 print(f"currently no support for argument: '{current_arg}' without a preceding flag. Exiting for safety. run with flag --help or --menu for more information")
+                exit(1)
 
     #Finish setup step, applying defaults where relevant
     def finish_setup(self):
@@ -204,7 +250,7 @@ class Configuration:
             print("No columns specified. Use -c <column> to add columns.")
             return False
         return True
-        #Future - check validity of input files, maybe offer fallbacks for columns?
+        #FUTURE - check validity of input files, maybe offer fallbacks for columns?
 
     # Reports the current configuration to the user, enabling them to confirm that the listed settings are correct
     def reportReady(self):
@@ -216,7 +262,6 @@ class Configuration:
 
     # Enables the user to confirm
     def userConfirm(self):
-        #Future - consider putting reportReady reference here, as its not super needed if confirmation step is skipped. Though its still goof for the record
         #Get user input, rejecting anything other than ""
         response = input("Press ENTER to continue, add any character and press ENTER to cancel: ")
         if response == "":
@@ -227,7 +272,7 @@ class Configuration:
 
 
 # CSVProcessor class for processing CSV files and replacing names in specified columns.
-# Future - add graceful handling somewhere for file issues
+# FUTURE - add graceful handling somewhere for file issues
 class CSVProcessor:
 
     def __init__(self, config: Configuration, renamer: Renamer):
@@ -286,7 +331,7 @@ class CSVProcessor:
             return renamer_instance.get_safe_name(nameString)
 
         else:
-            #splittingStrings = ["del","jr","sr"] #Future - also exempt strings like titles and connecting words?
+            #splittingStrings = ["del","jr","sr"] #FUTURE - also exempt strings like titles and connecting words?
             splittingCharacters = [' ','-','–','—',',']
 
             built_string = ""
@@ -321,29 +366,29 @@ if __name__ == "__main__":
     config.process_args(sys.argv[1:])
     config.finish_setup()
 
-    # Exit if validation fails. otherwise report ready
+    # Early return if validation fails. otherwise report ready
     if not config.validateConfig():
         print("Validation failed, use flag --help or --menu for more information \nExiting")
-        exit(0)
-    else:
-        config.reportReady() #Future: consider only 'reporting' here skipping isn't enabled. or call report from the userconfirm step
-    
-    if config.skip_confirmation_step or config.userConfirm():
-
-        #Create renamer and processor instances
-        renamer = Renamer(config.selected_seed)
-        file_processor = CSVProcessor(config,renamer)
-
-        #Start process, timing for user feedback
-        start_time = time.perf_counter()
-        file_processor.start()
-        end_time = time.perf_counter()
-
-        #Determine elapsed time and print exit message
-        elapsed_time = end_time - start_time
-        print(f"Process finished in {elapsed_time:0.3f}s\n")
-
-    else:
-        print("Exiting")
         exit(1)
+    
+    # Print final configuration to console
+    config.reportReady()
+    
+    #Early return if user does not confirm
+    if not config.skip_confirmation_step and not config.userConfirm():
+        print("Exiting")
+        exit(0)
+
+    #Create renamer and processor instances
+    renamer = Renamer(config.selected_seed,warn_on_max_attempts=config.warn_max_attempts)
+    file_processor = CSVProcessor(config,renamer)
+
+    #Start process, timing for user feedback
+    start_time = time.perf_counter()
+    file_processor.start()
+    end_time = time.perf_counter()
+
+    #Determine elapsed time and print exit message
+    elapsed_time = end_time - start_time
+    print(f"Process finished in {elapsed_time:0.3f}s\n")
 
