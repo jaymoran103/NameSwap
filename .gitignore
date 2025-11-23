@@ -1,3 +1,4 @@
 testdata/*
 altnames/renamed-*
+altnames/*.csv
 .DS_Store

@@ -1,10 +1,11 @@
 import sys
 import time
 import csv
-from faker import Faker
+import random
 from typing import Dict,Set
 from textwrap import dedent
-import random
+from faker import Faker
+
 
 #Help text for command line usage
 HELP_TEXT = dedent("""
@@ -16,7 +17,7 @@ HELP_TEXT = dedent("""
     (Extra -f and -c flags can be provided to add more flags and columns)
     
     For more options: main.py --menu 
-""")    
+""")
 
 # Detailed menu text for command line usage
 MENU_TEXT = dedent("""
@@ -102,24 +103,24 @@ class Configuration:
 
     # Initializes the Configuration with default settings, and maps flags and options to their handling functions.
     def __init__(self):
-        self.argument_count = -1
+        self.argument_count = -1 # Sentinel value, set whenever processing occurs
 
         #Inputs to collect
-        self.files = []
-        self.columns = []
+        self.files = set()
+        self.columns = set()
         self.selected_prefix = None
         self.selected_seed = None
 
         #Booleans, some settable by option flags
         self.skip_confirmation_step = False
         self.use_default_columns_if_none_specified = True
+        self.auto_detect_columns = False
         self.rename_whole_cells = False  #Applies renaming function to whole cells. For formats with multiple names in a cell ("First Last", "Last, First" "Hyphen-ated") this can lead to inconsistent outputs, and should be applied with caution
         self.warn_max_attempts = False
 
         #Default values, to apply as needed
         self.default_prefix = "renamed"
         self.default_columns = ["First Name","Last Name","Preferred Name","Camper"]
-        #self.default_seed = "safenames" default seed doesn't add much, currently interpreting no seed as user opting for non-deterministic naming
         #self.generic_default_columns = ["Name","Full Name","First Name","Last Name","Preferred Name","Nickname"] #Truly generic version for defaults. Not relevant to my use case
 
         # Map command-line flags to their handler functions
@@ -138,19 +139,16 @@ class Configuration:
             "--defaultcolumns" : self.handle_option_defaultcolumns,
             "--renamewholecells" : self.handle_option_renamewholecells,
             "--warnmaxattempts" : self.handle_option_warnmaxattempts,
-            # "--autocolumns" : autoDetectColumns, #FUTURE - add auto column detection feature from original version
+            "--autocolumns" : self.handle_option_autocolumns
         }
-
 
     # Handler for the '-f' flag adds input files for processing
     def handle_flag_file(self,path:str):
-        if path not in self.files: #FUTURE - catch file issues here?
-            self.files.append(path)
+        self.files.add(path) 
     
     # Handler for the '-c' flag adds target columns for renaming
     def handle_flag_column(self,col:str):
-        if col not in self.columns: #FUTURE - consider case sensitivity?
-            self.columns.append(col) 
+        self.columns.add(col) 
     
     # Handler for the '-p' flag sets the output file prefix. 
     def handle_flag_prefix(self,prefix:str):
@@ -160,32 +158,32 @@ class Configuration:
     def handle_flag_seed(self,seed:str):
         self.selected_seed = seed
 
-    # Handler for the '--menu' option – prints usage information.
+    # Handler for the '--menu' option – prints usage information and exits.
     def handle_option_menu(self):
         print(MENU_TEXT)
-        if self.argument_count > 1:
-            extras = self.argument_count - 1
-            plural = "s were" if extras != 1 else " was"
-            print(f"Note: {extras} extra argument{plural} found, but --menu stops execution.\nTo continue, remove --menu.")
+        self.autostop_warning("--menu")
         exit(0)
 
-    # Handler for the '--help' option to display help information.
+    # Handler for the '--help' option to display help information and exit.
     def handle_option_help(self):
         print(HELP_TEXT)
+        self.autostop_warning("--help")
+        exit(0)
+
+    # Warns user if extra arguments were provided when using a flag that stops execution
+    def autostop_warning(self,flag:str):
         if self.argument_count > 1:
             extras = self.argument_count - 1
             plural = "s were" if extras != 1 else " was"
-            print(f"Note: {extras} extra argument{plural} found, but --help stops execution.\nTo continue, remove --help.")
-        exit(0)
-
+            print(f"Note: {extras} extra argument{plural} found, but {flag} stops execution.\nTo continue, remove {flag}.")
+    
     # Handler for the '--skip' option to bypass confirmation step
     def handle_option_skip(self):
         self.skip_confirmation_step = True
 
     # Applies default columns to the configuration
     def handle_option_defaultcolumns(self):
-        for col in self.default_columns:
-            self.handle_flag_column(col)
+        self.columns.update(self.default_columns)
 
     # Applies renamer to whole name strings, not tokenizing to catch spaces or special characters.
     def handle_option_renamewholecells(self):
@@ -194,6 +192,10 @@ class Configuration:
     # Enables warning when max attempts to generate unique names is reached
     def handle_option_warnmaxattempts(self):
         self.warn_max_attempts = True
+
+    # Enables automatic detection of columns, based on common names
+    def handle_option_autocolumns(self):
+        self.auto_detect_columns = True
 
     # Processes command-line arguments to configure the application.
     def process_args(self,arg_queue:list):
@@ -227,11 +229,49 @@ class Configuration:
                 print(f"currently no support for argument: '{current_arg}' without a preceding flag. Exiting for safety. run with flag --help or --menu for more information")
                 exit(1)
 
+    # Scans all headers in the input files, adding them to target columns if they match common name patterns
+    def detect_columns(self,target_columns:set, input_files:set):
+        detected_columns = set()
+        #Iterate through input files
+        for filepath in input_files:
+
+            try:
+                #Open file and read headers. skip if no headers found
+                with open(filepath, 'r', newline='', encoding='utf-8-sig') as infile:
+                    reader = csv.DictReader(infile)
+                    if not reader.fieldnames:
+                        continue
+
+                    #Check each header for common name patterns
+                    for header in reader.fieldnames:
+                        l_header = header.lower()
+
+                        #add matches to detected columns
+                        #if l_header == "name" or "name" in l_header.split():
+                        if "name" in l_header: #more aggressive check, risks catching false positives like 'tournament'
+                            detected_columns.add(header)
+
+            except FileNotFoundError:
+                print(f"Warning: file '{filepath}' not found for auto column detection. Skipping.")
+            except Exception as e:
+                print(f"Warning: error reading '{filepath}' - {e}")
+
+        return detected_columns
+
+
     #Finish setup step, applying defaults where relevant
     def finish_setup(self):
 
+        #Apply auto-detected columns if enabled
+        if self.auto_detect_columns:
+
+            detected_columns = self.detect_columns(self.columns,self.files)
+            if detected_columns:
+                print(f"Auto-detected columns: {detected_columns}")
+                self.columns.update(detected_columns)
+
         #Apply default columns if none were specified and fallback is enabled
-        if self.columns == [] and self.use_default_columns_if_none_specified:
+        if not self.columns and self.use_default_columns_if_none_specified:
             print("No columns specified, applying default columns.")
             self.handle_option_defaultcolumns()
 
@@ -242,11 +282,10 @@ class Configuration:
 
     # Validates the current configuration to ensure inputs are valid and ready to use
     def validateConfig(self):
-        
-        if self.files == []:
+        if not self.files:
             print("No files specified. Use -f <file> to add files.")
             return False
-        if self.columns == []:
+        if not self.columns:
             print("No columns specified. Use -c <column> to add columns.")
             return False
         return True
@@ -254,10 +293,12 @@ class Configuration:
 
     # Reports the current configuration to the user, enabling them to confirm that the listed settings are correct
     def reportReady(self):
-        print("Ready to start with the following configuration:")
+        print("\nReady to start with the following configuration:")
         print(f"Files: {self.files}")
         print(f"Columns: {self.columns}")
         print(f"Prefix: {self.selected_prefix}")
+        if self.selected_seed is not None:
+            print(f"Seed: {self.selected_seed}")
         print()
 
     # Enables the user to confirm
@@ -284,10 +325,14 @@ class CSVProcessor:
         self.target_files = config.files
         self.given_prefix = config.selected_prefix
 
+        #Build lowercase column mapping for case insensitive matching 
+        self.lowercase_columns = {col.lower(): col for col in config.columns}
+
+
     def start(self):
         for input_file in self.target_files:
             output_file = f"{self.given_prefix}-{input_file}"
-            print(f"Processing {input_file} -> {output_file}",end="\n")
+            print(f"Processing {input_file} -> {output_file}",end="\n")#FUTURE - give a warning if file had no matching columns to rename?
             self.processFile(input_file, output_file)
     
     #iterate through input file, replacing names in target columns and writing to output file
@@ -304,6 +349,13 @@ class CSVProcessor:
                 # outfile.write(header_line)
                 if reader.fieldnames:
 
+                    #Compare present headers to config columns, building list of target columns to rename
+                    target_columns = []
+                    for header in reader.fieldnames:
+                        if header.lower() in self.lowercase_columns: #checking in standardized lower case
+                            target_columns.append(header)
+
+                    #Set up writer with same fieldnames as reader, then write header
                     writer = csv.DictWriter(
                         outfile, 
                         fieldnames=reader.fieldnames,
@@ -314,10 +366,9 @@ class CSVProcessor:
                     
                     #iterate through rows, replacing names when relevant
                     for row in reader:
-                        for col in self.name_columns:
-                            if col in row and row[col]:
-                                
-                                row[col] = self.renamingFunction(self.renamer,row[col])
+                        for col in target_columns:
+                            if row[col]:
+                                row[col] = self.renamingFunction(self.renamer, row[col])
 
                         # Write row with replaced names
                         writer.writerow(row)
