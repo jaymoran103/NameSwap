@@ -1,10 +1,8 @@
 # LOGIC
 
-[ ] Revisit the approach for handling buggy (CM Generated) headers
+[X] Revisit the approach for handling buggy (CM Generated) headers
 
-[ ] Check for file issues when processing arguments, maybe again right before using
-
-[ ] Consider exempting titles and connecting words when tokenizing names.
+[X] Check for file issues when processing arguments, maybe again right before using
 
 [X] implement autocolumns feature from og version?
 
@@ -27,3 +25,5 @@
 [ ] down the road, could add a '--savemap/--usemap' feature to save name mappings for consistent mapping between runs, and undoing anonymization. Not relevant to my current use case
 
 [ ] add --dryrun option? not critical since we're renaming new files anyway. Is it helpful to make direct renaming an option?
+
+[ ] Consider exempting titles and connecting words when tokenizing names. Not pivotal and persisting patterns might foil anonymization by exposing a unique name

@@ -264,11 +264,22 @@ class Configuration:
     #Finish setup step, applying defaults where relevant
     #TODO Check file validity here, reporting issues / removing references in advance
     def finish_setup(self):
-
-        if self.default_columns:
-            print(f"Added default columns: {sorted(self.default_columns)}")
-
-        #Apply auto-detected columns if enabled
+        # Validate and filter files
+        approved_files = []        
+        for filepath in self.files:
+            try:
+                with open(filepath, 'r', encoding='utf-8-sig') as f:
+                    pass  # Check if file can be opened
+                approved_files.append(filepath)
+            except FileNotFoundError:
+                print(f"Warning: File not found, skipping: {filepath}")
+            except PermissionError:
+                print(f"Warning: Permission denied, skipping: {filepath}")
+            except Exception as e:
+                print(f"Warning: Cannot read file, skipping: {filepath} ({e})")
+        # Update file set to exclude rejected files
+        self.files = set(approved_files)
+        # Auto-detect columns if enabled
         if self.auto_detect_columns:
             detected_columns = self.detect_columns(self.columns,self.files)
             if detected_columns:
@@ -280,19 +291,18 @@ class Configuration:
             print("No columns specified, applying default columns.")
             self.handle_option_defaultcolumns()
 
-        #Apply default prefix if none was specified
+        #Apply default prefix if not specified
         if self.selected_prefix is None:
             print(f"No prefix specified, applying default prefix '{self.default_prefix}'.")
             self.selected_prefix = self.default_prefix
 
-    # Validates the current configuration to ensure inputs are valid and ready to use. 
-    # This should either succeed or fail. Any amending of inputs should happen in the preceding setup step.
+    # Final validation: ensure minimum required inputs are present and ready to use.
     def validateConfig(self):
         if not self.files:
-            print("No files specified. Use -f <file> to add files.")
+            print("No valid files specified. Use -f <file> to add files.")
             return False
         if not self.columns:
-            print("No columns specified. Use -c <column> to add columns.")
+            print("No columns specified or detected. Use -c <column> to add columns.")
             return False
         return True
 
@@ -362,9 +372,12 @@ class CSVProcessor:
                 #Skip files with no headers, something went wrong
                 if not reader.fieldnames:
                     raise ValueError("No headers found.")
-
+                
+                # Filter empty headers caused by trailing commas or empty headers. #Output will differ from input, but averts errors in future file use.
+                valid_fieldnames = [f for f in reader.fieldnames if f and f.strip()]
+                
                 # Write renamed file
-                self.write_renamed_file(output_path,reader,detected_dialect)
+                self.write_renamed_file(output_path,reader,detected_dialect,valid_fieldnames)
 
         #Catch file errors to return a warning string, otherwise return None for success
         except FileNotFoundError:
@@ -383,17 +396,20 @@ class CSVProcessor:
         infile.seek(0)  
         #Attempt to detect dialect, defaulting to excel if detection fails
         try:
-            return csv.Sniffer().sniff(sample)
+            dialect = csv.Sniffer().sniff(sample)
+            if '"' in sample:
+                dialect.quoting = csv.QUOTE_ALL 
+            return dialect
         except csv.Error:
             return csv.excel
 
     # Write the renamed CSV file to the output path. Returns str indicating warning, otherwise None for success
-    def write_renamed_file(self,output_path:str, reader:csv.DictReader, detected_dialect:csv.Dialect) -> str:
+    def write_renamed_file(self,output_path:str, reader:csv.DictReader, detected_dialect:csv.Dialect, valid_fieldnames:list[str]) -> str: #FUTURE - format this on multiple lines?
         
         with open(output_path, 'w', newline='', encoding='utf-8') as outfile:
 
             #Compare present headers to config columns, building list of target columns to rename
-            target_columns = self.detect_target_columns(reader)
+            target_columns = self.detect_target_columns(valid_fieldnames)
 
             # If no columns matched, send a warning back instead of silently writing unmodified file
             if not target_columns:
@@ -402,8 +418,9 @@ class CSVProcessor:
             #Set up writer with same fieldnames as reader, then write header
             writer = csv.DictWriter(
                 outfile,
-                fieldnames=reader.fieldnames,
-                dialect=detected_dialect
+                fieldnames=valid_fieldnames,
+                dialect=detected_dialect,
+                extrasaction='ignore'
             )
             writer.writeheader()
             
@@ -414,15 +431,16 @@ class CSVProcessor:
                 # Write row with replaced names
                 writer.writerow(row)
         return None
-            
- 
+
     #Compare present headers to config columns, building list of target columns to rename
-    def detect_target_columns(self,reader:csv.DictReader):
+    def detect_target_columns(self,fieldnames:list[str]):
         target_columns = []
-        for header in reader.fieldnames:
+        for header in fieldnames:
             if header.lower() in self.lowercase_columns: #checking in standardized lower case
                 target_columns.append(header)
         return target_columns
+        #return [h for h in fieldnames if h.lower() in self.lowercase_columns] #more concise, less readable
+
 
 
     #Given a name string, returns a renamed, ready to use version
@@ -468,7 +486,7 @@ if __name__ == "__main__":
 
     # Early return if validation fails. otherwise report ready
     if not config.validateConfig():
-        print("Validation failed, use flag --help or --menu for more information \nExiting")
+        print("Exiting. Use --help or --menu for more usage information")
         exit(1)
     
     # Print final configuration to console
