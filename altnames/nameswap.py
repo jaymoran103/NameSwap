@@ -1,3 +1,6 @@
+"""NameSwap is a Python CLI tool to rename names in specified columns of CSV files, generating safe alternatives for demos."""
+# Created by Jay Moran in November 2025.
+# github.com/jaymoran103 | linkedin.com/in/jaymorandev
 import sys
 import time
 import csv
@@ -13,15 +16,15 @@ HELP_TEXT = dedent("""
     It requires command line arguments to specify the target files and columns for renaming.
     Each input requires a preceding flag to indicate its type.
     
-    Basic usage: main.py [-f <file>] [-c <column>]
+    Basic usage: nameswap.py [-f <file>] [-c <column>]
     (Extra -f and -c flags can be provided to add more flags and columns)
     
-    For more options: main.py --menu 
+    For more options: nameswap.py --menu 
 """)
 
 # Detailed menu text for command line usage
 MENU_TEXT = dedent("""
-    Usage: main.py [-f <file>] [-c <column>] [other flags] [options]
+    Usage: nameswap.py [-f <file>] [-c <column>] [other flags] [options]
     Note: Each input requires a preceding flag to indicate its type. 
 
     Input flags:
@@ -262,7 +265,6 @@ class Configuration:
 
 
     #Finish setup step, applying defaults where relevant
-    #TODO Check file validity here, reporting issues / removing references in advance
     def finish_setup(self):
         # Validate and filter files
         approved_files = []        
@@ -341,14 +343,18 @@ class CSVProcessor:
     def start_processing(self):
         for input_file in sorted(self.target_files):
             output_file = f"{self.given_prefix}-{input_file}"
-            print(f"Processing {input_file} -> {output_file}",end=" | ")#FUTURE - give a warning if file had no matching columns to rename?
+            print(f"Processing {input_file} -> {output_file}",end=" | ") #Line ends with a pipe, and try/catch ensures the result is printed on the same line
 
+            # Try to process the file, printing the result after the pipe
             try:
                 self.process_file(input_file, output_file)
                 print("Success")
+            #Catch file errors to return a warning string, otherwise return None for success
+            except FileNotFoundError:
+                print("Error: file not found. Skipping")
             except Exception as e:
-                # print(f"Error: {e}. Skipping")
                 print(f"Error: {e}")
+            return
             
 
     #Generate renamed row by applying renaming function to target columns
@@ -360,34 +366,26 @@ class CSVProcessor:
 
     #iterate through input file, replacing names in target columns and writing to output file.
     def process_file(self, input_path: str, output_path: str):
-        try:
-            with open(input_path, 'r', newline='', encoding='utf-8-sig') as infile:
+        
+        # No try catch for file operation, as the calling method catches all exceptions and reports status to terminal.
+        with open(input_path, 'r', newline='', encoding='utf-8-sig') as infile:
                 
-                #Detect dialect for file writing
-                detected_dialect = self.detect_dialect(infile)
+            #Detect dialect for file writing
+            detected_dialect = self.detect_dialect(infile)
 
-                # Create CSV reader for input file
-                reader = csv.DictReader(infile)
+            # Create CSV reader for input file
+            reader = csv.DictReader(infile)
 
-                #Skip files with no headers, something went wrong
-                if not reader.fieldnames:
-                    raise ValueError("No headers found.")
-                
-                # Filter empty headers caused by trailing commas or empty headers. #Output will differ from input, but averts errors in future file use.
-                valid_fieldnames = [f for f in reader.fieldnames if f and f.strip()]
-                
-                # Write renamed file
-                self.write_renamed_file(output_path,reader,detected_dialect,valid_fieldnames)
-
-        #Catch file errors to return a warning string, otherwise return None for success
-        except FileNotFoundError:
-            #return f"Error: file not found."
-            raise FileNotFoundError(f"input file not found")
-
-        except Exception as e:
-            # return f"Error: {e}."
-            raise RuntimeError(e)
-        return None
+            #Skip files with no headers, something went wrong
+            if not reader.fieldnames:
+                raise ValueError("No headers found.")
+            
+            # Filter empty headers caused by trailing commas or empty headers. 
+            # Output will differ from input, but averts errors in future file use.
+            valid_fieldnames = [f for f in reader.fieldnames if f and f.strip()]
+            
+            # Write renamed file
+            self.write_renamed_file(output_path,reader,detected_dialect,valid_fieldnames)
 
     # Check input file dialect for proper writing
     def detect_dialect(self,infile: TextIO):
@@ -404,7 +402,7 @@ class CSVProcessor:
             return csv.excel
 
     # Write the renamed CSV file to the output path. Returns str indicating warning, otherwise None for success
-    def write_renamed_file(self,output_path:str, reader:csv.DictReader, detected_dialect:csv.Dialect, valid_fieldnames:list[str]) -> str: #FUTURE - format this on multiple lines?
+    def write_renamed_file(self,output_path:str, reader:csv.DictReader, detected_dialect:csv.Dialect, valid_fieldnames:list[str]) -> str: #FUTURE - format this declaration to use on multiple lines? not
         
         with open(output_path, 'w', newline='', encoding='utf-8') as outfile:
 
@@ -452,7 +450,7 @@ class CSVProcessor:
             return self.renamer.get_safe_name(name_string)
 
         else:
-            #splitting_strings = ["del","jr","sr"] #FUTURE - also exempt strings like titles and connecting words?
+            #splitting_strings = ["jr","sr",del] #FUTURE - also exempt strings like titles and connecting words? # Not needed for my use case and may expose unique name formats
             splitting_characters = [' ','-','–','—',',']
 
             built_string = ""

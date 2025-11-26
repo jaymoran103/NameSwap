@@ -3,3 +3,4 @@ altnames/renamed-*
 altnames/*.csv
 .DS_Store
 929CSVs/*
+extensions.json

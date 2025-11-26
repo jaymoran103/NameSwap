@@ -12,9 +12,9 @@
 
 # DOCUMENTATION / REFACTORS
 
-[ ] i'll want a better program name than main.py once this is a standalone tool
+[X] i'll want a better program name than main.py once this is a standalone tool - NameSwap
 
-[ ] Add proper README
+[X] Add proper README
 
 [ ] are docstrings crucial if my comments already do that? linter seems to think so
 
@@ -22,8 +22,10 @@
 
 # FUTURE FEATURES
 
-[ ] down the road, could add a '--savemap/--usemap' feature to save name mappings for consistent mapping between runs, and undoing anonymization. Not relevant to my current use case
+[ ] Adapt name bank from poc demo for version without faker dependency.  
 
-[ ] add --dryrun option? not critical since we're renaming new files anyway. Is it helpful to make direct renaming an option?
+[ ] Adapt '--save and --load' from poc demo
 
-[ ] Consider exempting titles and connecting words when tokenizing names. Not pivotal and persisting patterns might foil anonymization by exposing a unique name
+[ ] Add direct renaming and a dryrun feature? Not needed for my use case.
+
+[ ] Add option to tokenize over other common name components? Not needed for my use case.
