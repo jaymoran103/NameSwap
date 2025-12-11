@@ -25,7 +25,7 @@ HELP_TEXT = dedent("""
     For more options: nameswap.py --menu 
 """)
 
-# Detailed menu text for command line usage #TODO add -m documentation here and throughout
+# Detailed menu text for command line usage
 MENU_TEXT = dedent("""
     Usage: nameswap.py [-f <file>] [-c <column>] [other flags] [options]
     Note: Each input requires a preceding flag to indicate its type. 
@@ -35,6 +35,7 @@ MENU_TEXT = dedent("""
         [-c <column>] - column(s) to rename. If none are provided, a default set is applied.
         [-p <prefix>] - optionally specify the prefix for renamed files. defaults to 'renamed-')
         [-s <seed>]   - optionally specify a seed for deterministic mappings. (same inputs with same seed yield same outputs)
+        [-m <mappingfile>] - optionally specify a path to a mapping session file to load and/or save mappings across sessions. (should be .json format)
 
     Option flags:
         [--help]             - display basic help information
@@ -51,7 +52,8 @@ class SessionManager:
     """Provide a save/load layer for continuous use of a mapping set across sessions."""
     
     @staticmethod
-    def data_to_json(config, renamer):
+    def _data_to_json(config, renamer):
+        """Given a configuration and renamer instance, assemble and return a JSON dict representing the session data."""
         session_data = {
             "config": {
                 "seed" : renamer.seed,
@@ -63,27 +65,23 @@ class SessionManager:
         return session_data
     
     @staticmethod
-    def json_to_data(json_data:dict):
-        #TODO wanted this to be parallel to data_to_json, but realize it might be best to pass the json to configuration for direct handling
-        pass
-    
-    @staticmethod
     def save_session(config, renamer):
         """ Save current mappings to a file for later use."""
-        #TODO do we want to save existing column names?
-
-        session_data = SessionManager.data_to_json(config, renamer)
+        
+        # Assemble session data
+        session_data = SessionManager._data_to_json(config, renamer)
         output_path = config.mapping_path
         
         try:
             with open(output_path, 'w', encoding='utf-8') as outfile:
                 json.dump(session_data, outfile, indent=2, ensure_ascii=False)
+                return True
         except PermissionError:
             print(f"Error: Permission denied, cannot save to: {output_path}")
-            raise
+            return False
         except Exception as e:
             print(f"Error: Cannot save file {output_path}: {e}")
-            raise
+            return False
 
     @staticmethod
     def load_session(input_path:str):
@@ -96,16 +94,17 @@ class SessionManager:
             if 'config' not in data or 'mappings' not in data:
                 raise ValueError("Invalid session file format")
             return data
-        #TODO refine exception catching flow
+        
+        # Catch and re-raise exceptions with more context, raising before exiting in calling method
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in session file: {e}")
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Session file not found: {input_path}")
-
+            raise ValueError(f"Invalid JSON in mapping file {input_path}: {e}. \nExiting.")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Couldn't find mapping file {input_path}: {e}. \nExiting.")
+        
 class Renamer:
     """ Renamer class for generating and storing safe names """
 
-    def __init__(self, _seed: str, _max_attempts: int = 25, _warn_on_max_attempts: bool = False,_prior_mappings:Dict[str,str]=None):
+    def __init__(self, _seed, _max_attempts: int = 25, _warn_on_max_attempts: bool = False,_prior_mappings:Dict[str,str]=None):
         """ Initializes the Renamer, with optional settings.
         
         Public Method: 
@@ -124,7 +123,7 @@ class Renamer:
         self.warn_on_max_attempts = _warn_on_max_attempts
         self.seed = _seed if _seed else random.randint(0,255)# Generate random seed if none specified
             
-        # Load prior mappings if provided. (TODO doing this separately to leave the constructor cleaner, but could be integrated)
+        # Load prior mappings if provided, replacing empty structures
         if _prior_mappings is not None:
             self.mappings: Dict[str, str] = _prior_mappings.copy() #Copy prior mappings if provided. Constructor argument defaults to empty dict
             self.used_names: Set[str] = set(_prior_mappings.values()) if _prior_mappings else set() #Set of already used safe names to ensure uniqueness
@@ -174,11 +173,13 @@ class Configuration:
     """ Configuration class assembles inputs and settings for use by the CSVProcessor.
     
     Public Methods:
-        process_args(arg_queue:list) - processes command-line arguments sequentially to configure the application.
-        setup_config() - Finish setup step, verifying inputs and applying defaults where relevant.
+        process_args() - processes command-line arguments sequentially to configure the application.
+        setup_config() - Perform all other steps via private helper methods, loading mappings, validating files, resolving columns, and applying defaults.
         validate_config() - Ensures minimum required inputs are present and ready to use. Returns boolean indicating for validity
         report_ready() - Reports the current configuration to the user, enabling them to confirm that the listed settings are correct
         user_confirm() - Waits for decision to continue or cancel renaming process, returning boolean indicating choice
+        
+    Private methods sit beneath the public method that calls them
     """
     
     def __init__(self):
@@ -275,7 +276,6 @@ class Configuration:
         """ Handles a series of setup steps using helper methods. This sequence follows argument processing, and precedes validation and reporting."""
         
         self._apply_mappings_if_specified() # If a mapping file is provided and valid, load and apply it.
-        print() #Print a blank line for visual separation in terminal output
         self._validate_given_files()  # Validate and filter files, updating the official set.
         self._resolve_columns() #apply some combination of given, auto-detected, and default columns. maybe even columns from mapping file?
         self._apply_remaining_defaults() #apply default prefix if none specified, maybe other defaults too?
@@ -297,7 +297,7 @@ class Configuration:
         self.files = set(approved_files)
     
     def _apply_mappings_if_specified(self):
-        """_summary_ Loads mapping session data if a valid mapping path is specified. Otherwise, exits silently."""
+        """Loads mapping session data if a valid mapping path is specified. Otherwise, exits silently."""
         
         # Exit if no mapping path specified
         if self.mapping_path is None:
@@ -334,14 +334,19 @@ class Configuration:
                     print(f"Seed was set by user input ({self.selected_seed}), overriding loaded seed ({config_json['seed']}). To use the loaded seed, remove '-s {self.selected_seed}' and rerun")
             
             if "rename_whole_cells" in config_json:
-                self.rename_whole_cells = config_json["rename_whole_cells"]
-                print(f"Applied rename_whole_cells from session data: {self.rename_whole_cells}")
-                #FUTURE revise handling of this setting, checking for a sentinel value before updating. Sentinel values not modified here will be taken care of in apply_remaining_defaults()
-                            
-        except (FileNotFoundError,ValueError) as e:
-            print(f"Issue with mapping file {self.mapping_path}: {e}")
-            exit(1)
+                #Apply only if not already set by user input. Could have used sentinel value above, but for a niche, non-reccomended option, id rather leave it clearly false by default and not complicate its declaration and usage.         
+                if not self.rename_whole_cells:
+                    self.rename_whole_cells = config_json["rename_whole_cells"]
+                    print(f"Applied rename_whole_cells from session data: {self.rename_whole_cells}")
+                    
+            #FUTURE - other saved config options would go here
+            
+            print() #Print a blank line for visual separation in terminal output, ending this long mapping section
 
+        #If loading fails, print raised errors (formatted elsewhere) and exit 
+        except (FileNotFoundError,ValueError) as e:
+            print(f"{e}")
+            exit(1)
         except Exception as e:
             print(f"{e}")
             exit(1)   
@@ -419,7 +424,7 @@ class Configuration:
     def report_ready(self):
         """ Reports the current configuration to the user, enabling them to confirm that the listed settings are correct"""
         
-        print("\nReady to start with the following configuration:")#TODO with more print reporting now, might make sense to ensure visual separation here and maybe bold or recolor this 'header'
+        print("\nReady to start with the following configuration:")#FUTURE - consider emphasizing this section visually so its not lost in the report.
         print(f"Files: {sorted(self.files)}")
         print(f"Columns: {sorted(self.columns)}")
         print(f"Prefix: {self.selected_prefix}")
@@ -535,7 +540,10 @@ class CSVProcessor:
         except csv.Error:
             return csv.excel
 
-    def _write_renamed_file(self,output_path:str, reader:csv.DictReader, detected_dialect:csv.Dialect, valid_fieldnames:list[str]) -> str: #FUTURE - format this declaration to use on multiple lines? not
+    def _write_renamed_file(self,output_path:str, 
+                            reader:csv.DictReader, 
+                            detected_dialect:csv.Dialect, 
+                            valid_fieldnames:list[str]) -> str:
         """ Write renamed CSV file to output path, applying renaming to target columns."""
         
         # No try catch for file operation, as the calling method start_processing() catches all exceptions and reports status to terminal.
@@ -613,7 +621,7 @@ if __name__ == "__main__":
     #Set up config instance, process given arguments, finish setup
     config = Configuration()
     config.process_args(sys.argv[1:])
-    config.finish_setup()
+    config.setup_config()
 
     # Early return if validation fails. otherwise report ready
     if not config.validate_config():
@@ -646,9 +654,9 @@ if __name__ == "__main__":
     
     #Save session if mapping path specified
     if config.mapping_path:
-        SessionManager.save_session(config, renamer)
-        
-
+        if SessionManager.save_session(config, renamer):# Successful save returns True. Unsuccessful save prints error internally and returns False
+            print(f"Mapping session saved to {config.mapping_path}")
+            
     #Determine elapsed time and print exit message
     elapsed_time = end_time - start_time
     print(f"Process finished in {elapsed_time:0.3f}s\n")

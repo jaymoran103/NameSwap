@@ -1,9 +1,4 @@
+.DS_Store
+extensions.json
 testdata/*
 
-altnames/renamed-*
-altnames/*.csv
-altnames/*.json
-
-.DS_Store
-929CSVs/*
-extensions.json
